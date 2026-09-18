@@ -29,9 +29,14 @@
 #include "../common/RemoteAR.h"
 #include <cover/VRViewer.h>
 #include <cover/coVRMSController.h>
-#include <opencv2/calib3d/calib3d.hpp>
-#include <opencv2/imgproc.hpp>
 
+#if CV_VERSION_MAJOR >= 5
+#include <opencv2/calib3d.hpp>
+#else
+#include <opencv2/calib3d/calib3d.hpp>
+#endif
+
+#include <opencv2/imgproc.hpp>
 #include <cover/coVRFileManager.h>
 
 
@@ -534,76 +539,96 @@ void ARUCOPlugin::calibrate()
     }
     if (allIds.size() > 15)
     {
-        cv::aruco::CharucoParameters cp;
-        cv::aruco::RefineParameters rp;
         Mat cameraMatrix, distCoeffs;
-        vector< Mat > rvecs, tvecs;
-        double repError;
+        vector<Mat> rvecs, tvecs;
+        double repError = -1.0;
+        double arucoRepErr = -1.0;
+        int calibrationFlags = 0;
+        float aspectRatio = 1.0f;
 
-        // prepare data for calibration
-        vector< vector< Point2f > > allCornersConcatenated;
-        vector< int > allIdsConcatenated;
-        vector< int > markerCounterPerFrame;
-        markerCounterPerFrame.reserve(allCorners.size());
-        for (unsigned int i = 0; i < allCorners.size(); i++) {
+#if CV_VERSION_MAJOR < 5
+        // OpenCV 4 (old path)
+        std::vector<std::vector<cv::Point2f>> allCornersConcatenated;
+        std::vector<int> allIdsConcatenated;
+        std::vector<int> markerCounterPerFrame;
+
+        for (size_t i = 0; i < allCorners.size(); ++i)
+        {
             markerCounterPerFrame.push_back((int)allCorners[i].size());
-            for (unsigned int j = 0; j < allCorners[i].size(); j++) {
+            for (size_t j = 0; j < allCorners[i].size(); ++j)
+            {
                 allCornersConcatenated.push_back(allCorners[i][j]);
                 allIdsConcatenated.push_back(allIds[i][j]);
             }
         }
-        int calibrationFlags = 0;
-        float aspectRatio = 1;
 
-        // calibrate camera using aruco markers
-        double arucoRepErr;
-        arucoRepErr = aruco::calibrateCameraAruco(allCornersConcatenated, allIdsConcatenated,
-            markerCounterPerFrame, charucoboard, imgSize, cameraMatrix,
-            distCoeffs, noArray(), noArray(), calibrationFlags);
+        arucoRepErr = cv::aruco::calibrateCameraAruco(
+            allCornersConcatenated, allIdsConcatenated, markerCounterPerFrame,
+            charucoboard, imgSize, cameraMatrix, distCoeffs, noArray(), noArray(), calibrationFlags);
 
-        // prepare data for charuco calibration
-        int nFrames = (int)allCorners.size();
-        vector< Mat > allCharucoCorners;
-        vector< Mat > allCharucoIds;
-        vector< Mat > filteredImages;
-        allCharucoCorners.reserve(nFrames);
-        allCharucoIds.reserve(nFrames);
-
-        for (int i = 0; i < nFrames; i++) {
-            // interpolate using camera parameters
-            Mat currentCharucoCorners, currentCharucoIds;
-            cp.cameraMatrix = cameraMatrix;
-            cp.distCoeffs = distCoeffs;
-            charucoDetector->detectBoard(allImgs[i], currentCharucoCorners, currentCharucoIds, allCorners[i], allIds[i]);
-
-            allCharucoCorners.push_back(currentCharucoCorners);
-            allCharucoIds.push_back(currentCharucoIds);
-            filteredImages.push_back(allImgs[i]);
-        }
-
-        if (allCharucoCorners.size() < 4) {
-            cerr << "Not enough corners for calibration" << endl;
-        }
-        else
+        std::vector<cv::Mat> allCharucoCorners, allCharucoIds;
+        for (size_t i = 0; i < allImgs.size(); ++i)
         {
-
-            // calibrate camera using charuco
-            repError =
-                aruco::calibrateCameraCharuco(allCharucoCorners, allCharucoIds, charucoboard, imgSize,
-                    cameraMatrix, distCoeffs, rvecs, tvecs, calibrationFlags);
-
-            bool saveOk = saveCameraParams(calibrationFilename, imgSize, aspectRatio, calibrationFlags,
-                cameraMatrix, distCoeffs, repError);
-            if (!saveOk) {
-                cerr << "Cannot save output file" << endl;
-            }
-            else
+            cv::Mat cc, ci;
+            cv::aruco::interpolateCornersCharuco(
+                allCorners[i], allIds[i], allImgs[i], charucoboard, cc, ci, cameraMatrix, distCoeffs);
+            if (!cc.empty() && !ci.empty())
             {
-                cerr << "Rep Error: " << repError << endl;
-                cerr << "Rep Error Aruco: " << arucoRepErr << endl;
-                cerr << "Calibration saved to " << calibrationFilename << endl;
+                allCharucoCorners.push_back(cc);
+                allCharucoIds.push_back(ci);
             }
         }
+
+        if (allCharucoCorners.size() >= 4)
+        {
+            repError = cv::aruco::calibrateCameraCharuco(
+                allCharucoCorners, allCharucoIds, charucoboard, imgSize,
+                cameraMatrix, distCoeffs, rvecs, tvecs, calibrationFlags);
+        }
+#else
+        // OpenCV 5 (new path)
+        std::vector<std::vector<cv::Point3f>> objectPoints;
+        std::vector<std::vector<cv::Point2f>> imagePoints;
+        const auto &boardCorners = charucoboard->getChessboardCorners();
+
+        for (size_t i = 0; i < allImgs.size(); ++i)
+        {
+            Mat cc, ci;
+            charucoDetector->detectBoard(allImgs[i], cc, ci, allCorners[i], allIds[i]);
+            if (cc.empty() || ci.empty())
+                continue;
+
+            std::vector<cv::Point2f> imgPts;
+            std::vector<cv::Point3f> objPts;
+
+            for (int k = 0; k < ci.rows; ++k)
+            {
+                int id = ci.at<int>(k, 0);
+                if (id >= 0 && id < (int)boardCorners.size())
+                {
+                    imgPts.push_back(cc.at<cv::Point2f>(k, 0));
+                    objPts.push_back(boardCorners[id]);
+                }
+            }
+
+            if (imgPts.size() >= 4)
+            {
+                imagePoints.push_back(std::move(imgPts));
+                objectPoints.push_back(std::move(objPts));
+            }
+        }
+
+        if (imagePoints.size() >= 4)
+            repError = cv::calibrateCamera(objectPoints, imagePoints, imgSize, cameraMatrix, distCoeffs, rvecs, tvecs, calibrationFlags);
+#endif
+
+        bool saveOk = saveCameraParams(calibrationFilename, imgSize, aspectRatio, calibrationFlags,
+                                       cameraMatrix, distCoeffs, repError);
+
+        if (!saveOk)
+            cerr << "Cannot save output file" << endl;
+        else
+            cerr << "Rep Error: " << repError << endl;
 
         doCalibrate = false;
         allImgs.clear();

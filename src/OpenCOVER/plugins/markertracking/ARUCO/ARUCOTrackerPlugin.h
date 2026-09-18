@@ -20,11 +20,13 @@
 
 #include <cover/coVRPlugin.h>
 
+#include <opencv2/core/version.hpp>
 #include <opencv2/videoio/videoio.hpp>
-#if( CV_VERSION_MAJOR == 4)
+
+#if CV_VERSION_MAJOR >= 4
+#include <opencv2/objdetect/aruco_dictionary.hpp>
 #include <opencv2/objdetect/aruco_detector.hpp>
 #include <opencv2/objdetect/charuco_detector.hpp>
-#include <opencv2/aruco.hpp>
 #else
 #include <opencv2/aruco.hpp>
 #endif

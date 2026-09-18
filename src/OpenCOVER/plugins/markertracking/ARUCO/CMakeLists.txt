@@ -1,8 +1,69 @@
-
-if(NOT COVISE_USE_OPENCV4)
+if(NOT COVISE_USE_OPENCV4 AND NOT COVISE_USE_OPENCV5)
+    message(WARNING
+      "ARUCO plugin disabled: OpenCV not found or unsupported. "
+      "Supported versions are OpenCV 4 and 5.")
     return()
 endif()
 USING(OpenCV)
+
+# Resolve calibration lib robustly:
+# OpenCV4: opencv_calib3d
+# Some OpenCV5 packages: opencv_calib
+set(ARUCO_CALIB_LIB "")
+if(DEFINED OPENCV_CALIB3D_LIBRARY AND NOT OPENCV_CALIB3D_LIBRARY STREQUAL "OPENCV_CALIB3D_LIBRARY-NOTFOUND")
+    set(ARUCO_CALIB_LIB "${OPENCV_CALIB3D_LIBRARY}")
+elseif(DEFINED OPENCV_CALIB_LIBRARY AND NOT OPENCV_CALIB_LIBRARY STREQUAL "OPENCV_CALIB_LIBRARY-NOTFOUND")
+    set(ARUCO_CALIB_LIB "${OPENCV_CALIB_LIBRARY}")
+else()
+    find_library(ARUCO_CALIB_LIB
+        NAMES opencv_calib3d opencv_calib
+        PATHS /usr /usr/local
+        PATH_SUFFIXES lib lib64
+    )
+endif()
+
+if(NOT ARUCO_CALIB_LIB)
+    message(FATAL_ERROR "ARUCO: no OpenCV calibration library found (opencv_calib3d/opencv_calib)")
+endif()
+
+message(STATUS "ARUCO calib lib: ${ARUCO_CALIB_LIB}")
+
+# Resolve geometry lib (OpenCV5 package split)
+set(ARUCO_GEOMETRY_LIB "")
+
+if(DEFINED OPENCV_GEOMETRY_LIBRARY
+   AND NOT OPENCV_GEOMETRY_LIBRARY STREQUAL ""
+   AND NOT OPENCV_GEOMETRY_LIBRARY STREQUAL "OPENCV_GEOMETRY_LIBRARY-NOTFOUND"
+   AND EXISTS "${OPENCV_GEOMETRY_LIBRARY}")
+    set(ARUCO_GEOMETRY_LIB "${OPENCV_GEOMETRY_LIBRARY}")
+else()
+    find_library(ARUCO_GEOMETRY_LIB
+        NAMES opencv_geometry
+        PATHS /usr /usr/local
+        PATH_SUFFIXES lib lib64
+    )
+
+    if(NOT ARUCO_GEOMETRY_LIB OR ARUCO_GEOMETRY_LIB STREQUAL "ARUCO_GEOMETRY_LIB-NOTFOUND")
+        find_file(ARUCO_GEOMETRY_LIB
+            NAMES libopencv_geometry.so libopencv_geometry.so.500 libopencv_geometry.so.5.0.0
+            PATHS /usr/lib /usr/local/lib /usr/lib64 /usr/local/lib64
+        )
+    endif()
+endif()
+
+message(STATUS "ARUCO geometry lib: ${ARUCO_GEOMETRY_LIB}")
+
+set(ARUCO_OPENCV_LIBS
+    ${OPENCV_CORE_LIBRARY}
+    ${OPENCV_IMGPROC_LIBRARY}
+    ${OPENCV_VIDEOIO_LIBRARY}
+    ${OPENCV_HIGHGUI_LIBRARY}
+    ${OPENCV_OBJDETECT_LIBRARY}
+    ${ARUCO_CALIB_LIB}
+    ${ARUCO_GEOMETRY_LIB}
+)
+list(FILTER ARUCO_OPENCV_LIBS EXCLUDE REGEX ".*-NOTFOUND$")
+message(STATUS "ARUCO OpenCV libs: ${ARUCO_OPENCV_LIBS}")
 
 SET(ARUCO_USE_CUDA FALSE)
 
@@ -112,27 +173,32 @@ SET(SOURCES
 
 IF(ARUCO_USE_CUDA)
 IF(CUDA_FOUND)
-  SET(ARUCO_CUDA_SOURCES dxtc2.cu)
-  SET(CUDA_NVCC_DEFINITIONS "GLUT_NO_LIB_PRAGMA")
-  
-  SET(SOURCES  ${SOURCES} ${ARUCO_CUDA_SOURCES})
-  INCLUDE_DIRECTORIES(
-     ${CUDA_INCLUDE_DIRS}
-     ${CUDA_SDK_ROOT_DIR}/common/inc
-  )
-  CUDA_COMPILE(COGPU_CUDA_OBJ ${ARUCO_CUDA_SOURCES} SHARED OPTIONS "-DGLUT_NO_LIB_PRAGMA -D__builtin_stdarg_start=__builtin_va_start")
-  SET(EXTRA_LIBS ${CUDA_LIBRARIES})
-# TODO, add CUDA Objects to plugin ADD_COVISE_LIBRARY(coGPU SHARED ${COGPU_SOURCES} ${COGPU_HEADERS} ${COGPU_CUDA_OBJ})
-
-cover_add_plugin(ARUCO ${CUDA_CUT_LIBRARIES} ${HEADERS} ${SOURCES})
+  cover_add_plugin(ARUCO ${CUDA_CUT_LIBRARIES} ${HEADERS} ${SOURCES})
 ELSE(CUDA_FOUND)
-cover_add_plugin(ARUCO ${HEADERS} ${SOURCES})
+  cover_add_plugin(ARUCO ${HEADERS} ${SOURCES})
 ENDIF(CUDA_FOUND)
-
 ELSE(ARUCO_USE_CUDA)
-cover_add_plugin(ARUCO ${HEADERS} ${SOURCES})
+  cover_add_plugin(ARUCO ${HEADERS} ${SOURCES})
 ENDIF(ARUCO_USE_CUDA)
 
+# after cover_add_plugin(ARUCO ...)
+find_library(ARUCO_GEOMETRY_LIB NAMES opencv_geometry REQUIRED PATHS /usr/lib /usr/local/lib)
+find_library(ARUCO_CALIB_LIB    NAMES opencv_calib3d opencv_calib REQUIRED PATHS /usr/lib /usr/local/lib)
+
+message(STATUS "ARUCO_GEOMETRY_LIB=${ARUCO_GEOMETRY_LIB}")
+message(STATUS "ARUCO_CALIB_LIB=${ARUCO_CALIB_LIB}")
+
+if(TARGET ARUCO)
+  target_link_libraries(ARUCO
+    /usr/lib/libopencv_core.so
+    /usr/lib/libopencv_imgproc.so
+    /usr/lib/libopencv_videoio.so
+    /usr/lib/libopencv_highgui.so
+    /usr/lib/libopencv_objdetect.so
+    /usr/lib/libopencv_calib.so
+    /usr/lib/libopencv_geometry.so
+  )
+endif()
 
 SET(HEADERS
 )
@@ -144,11 +210,4 @@ ADD_COVISE_EXECUTABLE(createMarker)
 COVISE_WNOERROR(createMarker)
 
 TARGET_LINK_LIBRARIES(createMarker ${EXTRA_LIBS} )
-
-
-#IF(MSVC AND NOT MSVC10)
-#  ADD_COVISE_COMPILE_FLAGS(ARUCO "/Zc:wchar_t-")
-#ENDIF()
-
-#TARGET_LINK_LIBRARIES(ARUCO ${ARUCO_LIBRARIES}) 
 
