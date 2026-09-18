@@ -6,52 +6,36 @@ if(NOT COVISE_USE_OPENCV4 AND NOT COVISE_USE_OPENCV5)
 endif()
 USING(OpenCV)
 
-# Resolve calibration lib robustly:
-# OpenCV4: opencv_calib3d
-# Some OpenCV5 packages: opencv_calib
-set(ARUCO_CALIB_LIB "")
-if(DEFINED OPENCV_CALIB3D_LIBRARY AND NOT OPENCV_CALIB3D_LIBRARY STREQUAL "OPENCV_CALIB3D_LIBRARY-NOTFOUND")
-    set(ARUCO_CALIB_LIB "${OPENCV_CALIB3D_LIBRARY}")
-elseif(DEFINED OPENCV_CALIB_LIBRARY AND NOT OPENCV_CALIB_LIBRARY STREQUAL "OPENCV_CALIB_LIBRARY-NOTFOUND")
+# calib: OpenCV4=calib3d, some OpenCV5 packages=calib
+set(ARUCO_CALIB_LIB "${OPENCV_CALIB3D_LIBRARY}")
+if((NOT ARUCO_CALIB_LIB OR ARUCO_CALIB_LIB STREQUAL "OPENCV_CALIB3D_LIBRARY-NOTFOUND")
+   AND DEFINED OPENCV_CALIB_LIBRARY
+   AND NOT OPENCV_CALIB_LIBRARY STREQUAL "OPENCV_CALIB_LIBRARY-NOTFOUND")
     set(ARUCO_CALIB_LIB "${OPENCV_CALIB_LIBRARY}")
-else()
-    find_library(ARUCO_CALIB_LIB
-        NAMES opencv_calib3d opencv_calib
-        PATHS /usr /usr/local
-        PATH_SUFFIXES lib lib64
-    )
 endif()
 
-if(NOT ARUCO_CALIB_LIB)
-    message(FATAL_ERROR "ARUCO: no OpenCV calibration library found (opencv_calib3d/opencv_calib)")
-endif()
-
-message(STATUS "ARUCO calib lib: ${ARUCO_CALIB_LIB}")
-
-# Resolve geometry lib (OpenCV5 package split)
+# geometry: needed on some OpenCV5 package layouts (solvePnP/Rodrigues)
 set(ARUCO_GEOMETRY_LIB "")
+if(COVISE_USE_OPENCV5)
+    unset(ARUCO_GEOMETRY_LIB CACHE)
+    get_filename_component(_opencv_libdir "${OPENCV_CORE_LIBRARY}" DIRECTORY)
 
-if(DEFINED OPENCV_GEOMETRY_LIBRARY
-   AND NOT OPENCV_GEOMETRY_LIBRARY STREQUAL ""
-   AND NOT OPENCV_GEOMETRY_LIBRARY STREQUAL "OPENCV_GEOMETRY_LIBRARY-NOTFOUND"
-   AND EXISTS "${OPENCV_GEOMETRY_LIBRARY}")
-    set(ARUCO_GEOMETRY_LIB "${OPENCV_GEOMETRY_LIBRARY}")
-else()
-    find_library(ARUCO_GEOMETRY_LIB
-        NAMES opencv_geometry
-        PATHS /usr /usr/local
-        PATH_SUFFIXES lib lib64
-    )
-
-    if(NOT ARUCO_GEOMETRY_LIB OR ARUCO_GEOMETRY_LIB STREQUAL "ARUCO_GEOMETRY_LIB-NOTFOUND")
-        find_file(ARUCO_GEOMETRY_LIB
-            NAMES libopencv_geometry.so libopencv_geometry.so.500 libopencv_geometry.so.5.0.0
+    # 1) direct known path fallback
+    if(EXISTS "${_opencv_libdir}/libopencv_geometry.so")
+        set(ARUCO_GEOMETRY_LIB "${_opencv_libdir}/libopencv_geometry.so")
+    else()
+        # 2) regular lookup
+        find_library(ARUCO_GEOMETRY_LIB
+            NAMES opencv_geometry
+            HINTS "${_opencv_libdir}"
             PATHS /usr/lib /usr/local/lib /usr/lib64 /usr/local/lib64
         )
     endif()
-endif()
 
-message(STATUS "ARUCO geometry lib: ${ARUCO_GEOMETRY_LIB}")
+    if(NOT ARUCO_GEOMETRY_LIB OR ARUCO_GEOMETRY_LIB STREQUAL "ARUCO_GEOMETRY_LIB-NOTFOUND")
+        message(FATAL_ERROR "ARUCO: OpenCV5 needs opencv_geometry for solvePnP/Rodrigues")
+    endif()
+endif()
 
 set(ARUCO_OPENCV_LIBS
     ${OPENCV_CORE_LIBRARY}
@@ -63,7 +47,10 @@ set(ARUCO_OPENCV_LIBS
     ${ARUCO_GEOMETRY_LIB}
 )
 list(FILTER ARUCO_OPENCV_LIBS EXCLUDE REGEX ".*-NOTFOUND$")
-message(STATUS "ARUCO OpenCV libs: ${ARUCO_OPENCV_LIBS}")
+list(REMOVE_ITEM ARUCO_OPENCV_LIBS "")
+list(REMOVE_DUPLICATES ARUCO_OPENCV_LIBS)
+
+message(STATUS "ARUCO final OpenCV libs: ${ARUCO_OPENCV_LIBS}")
 
 SET(ARUCO_USE_CUDA FALSE)
 
@@ -181,23 +168,9 @@ ELSE(ARUCO_USE_CUDA)
   cover_add_plugin(ARUCO ${HEADERS} ${SOURCES})
 ENDIF(ARUCO_USE_CUDA)
 
-# after cover_add_plugin(ARUCO ...)
-find_library(ARUCO_GEOMETRY_LIB NAMES opencv_geometry REQUIRED PATHS /usr/lib /usr/local/lib)
-find_library(ARUCO_CALIB_LIB    NAMES opencv_calib3d opencv_calib REQUIRED PATHS /usr/lib /usr/local/lib)
-
-message(STATUS "ARUCO_GEOMETRY_LIB=${ARUCO_GEOMETRY_LIB}")
-message(STATUS "ARUCO_CALIB_LIB=${ARUCO_CALIB_LIB}")
 
 if(TARGET ARUCO)
-  target_link_libraries(ARUCO
-    /usr/lib/libopencv_core.so
-    /usr/lib/libopencv_imgproc.so
-    /usr/lib/libopencv_videoio.so
-    /usr/lib/libopencv_highgui.so
-    /usr/lib/libopencv_objdetect.so
-    /usr/lib/libopencv_calib.so
-    /usr/lib/libopencv_geometry.so
-  )
+    target_link_libraries(ARUCO ${ARUCO_OPENCV_LIBS})
 endif()
 
 SET(HEADERS
