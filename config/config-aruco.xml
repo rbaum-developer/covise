@@ -32,6 +32,8 @@
 
         <ARUCO value="ON">
           <Capture value="on" />
+          <VideoDevice ARCH="linux64opt" value="0" width="1920" height="1080" fourcc="MJPG" fps="30" />
+          <CameraCalibrationFile ARCH="linux64opt" value="~/covise/cameras/Logitech_HDProWebcamC920_No2_1920x1080.yaml" />
           <VideoDevice ARCH="linux" value="0" width="1920" height="1080" fourcc="MJPG" fps="60" />
           <CameraCalibrationFile ARCH="linux" value="/data/aruco/cameras/Logitech_HDProWebcamC920_No2_1920x1080.yaml" />
           <VideoDevice ARCH="macos" value="0" width="1280" height="720" />

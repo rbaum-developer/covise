@@ -39,8 +39,6 @@
 #include <opencv2/imgproc.hpp>
 #include <cover/coVRFileManager.h>
 
-
-#include <cover/coTabletUI.h>
 #include <cover/coVRPlugin.h>
 #include <cover/coInteractor.h>
 #include <util/unixcompat.h>
@@ -48,6 +46,12 @@
 
 #include <vector>
 #include <string>
+#include <filesystem>
+#include <array>
+#include <sstream>
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
 
 using std::cout;
 using std::endl;
@@ -367,6 +371,18 @@ void ARUCOPlugin::initUI()
     {
         startCallibration();
     });
+
+    // add camera controls
+    uiBtnDetectCamera = new ui::Action(uiMenu, "detectCamera");
+    uiBtnDetectCamera->setText("Detect Cameras");
+    uiBtnDetectCamera->setCallback([this]() { detectCameras(); });
+
+    uiCameraDevices = new ui::SelectionList(uiMenu, "cameraDevices");
+    uiCameraDevices->setText("Camera Device");
+    uiCameraDevices->setCallback([this](int idx) {
+        if (idx >= 0 && idx < static_cast<int>(m_cameraDeviceIds.size()))
+            requestCameraSwitch(m_cameraDeviceIds[idx]);
+    });
 }
 
 // ----------------------------------------------------------------------------
@@ -383,6 +399,7 @@ bool ARUCOPlugin::init()
     
     // ui init
     initUI();
+    detectCameras();
 
     // ar init
     if (!initAR())
@@ -643,6 +660,18 @@ void ARUCOPlugin::opencvLoop()
 {
     for (;;)
     {
+        int req = -1;
+        {
+            std::lock_guard<std::mutex> g(opencvMutex);
+            if (m_requestedDevice >= 0)
+            {
+                req = m_requestedDevice;
+                m_requestedDevice = -1;
+            }
+        }
+        if (req >= 0)
+            switchCamera(req);
+
         std::unique_lock<std::mutex> guard(opencvMutex);
         if (!opencvRunning)
             return;
@@ -908,6 +937,127 @@ int ARUCOPlugin::loadPattern(const char* p)
     }
     return pattID;
 }
-    
+
+std::string ARUCOPlugin::runCommand(const std::string &cmd)
+{
+    std::array<char, 512> buf{};
+    std::string out;
+    FILE *pipe = popen(cmd.c_str(), "r");
+    if (!pipe)
+        return out;
+    while (fgets(buf.data(), static_cast<int>(buf.size()), pipe))
+        out += buf.data();
+    pclose(pipe);
+    return out;
+}
+
+std::string ARUCOPlugin::parseCardType(const std::string &v4l2Info)
+{
+    std::istringstream is(v4l2Info);
+    std::string line;
+    while (std::getline(is, line))
+    {
+        auto pos = line.find("Card type");
+        if (pos != std::string::npos)
+        {
+            auto colon = line.find(':', pos);
+            if (colon != std::string::npos)
+            {
+                std::string name = line.substr(colon + 1);
+                while (!name.empty() && std::isspace((unsigned char)name.front())) name.erase(name.begin());
+                while (!name.empty() && std::isspace((unsigned char)name.back())) name.pop_back();
+                return name;
+            }
+        }
+    }
+    return "unknown";
+}
+
+void ARUCOPlugin::detectCameras()
+{
+    struct Cam { int id; std::string label; };
+    std::vector<Cam> cams;
+
+    namespace fs = std::filesystem;
+    for (const auto &e : fs::directory_iterator("/dev"))
+    {
+        const std::string fn = e.path().filename().string();
+        if (fn.rfind("video", 0) != 0)
+            continue;
+
+        const std::string n = fn.substr(5);
+        if (n.empty() || !std::all_of(n.begin(), n.end(), ::isdigit))
+            continue;
+
+        int id = std::stoi(n);
+        std::string dev = "/dev/" + fn;
+        std::string info = runCommand("v4l2-ctl -d " + dev + " --info 2>/dev/null");
+        if (info.empty())
+            continue;
+
+        cams.push_back({id, std::to_string(id) + " - " + parseCardType(info)});
+    }
+
+    std::sort(cams.begin(), cams.end(), [](const Cam &a, const Cam &b) { return a.id < b.id; });
+
+    m_cameraDeviceIds.clear();
+    std::vector<std::string> labels;
+    for (const auto &c : cams)
+    {
+        m_cameraDeviceIds.push_back(c.id);
+        labels.push_back(c.label);
+    }
+
+    if (uiCameraDevices)
+    {
+        uiCameraDevices->setList(labels);
+        uiCameraDevices->setEnabled(!labels.empty());
+
+        if (!labels.empty())
+            uiCameraDevices->select(0, false);
+    }
+}
+
+void ARUCOPlugin::requestCameraSwitch(int deviceId)
+{
+    std::lock_guard<std::mutex> g(opencvMutex);
+    m_requestedDevice = deviceId;
+}
+
+void ARUCOPlugin::switchCamera(int deviceId)
+{
+    bool exists = false;
+    if (inputVideo.isOpened())
+        inputVideo.release();
+
+#if CV_VERSION_MAJOR > 3 || (CV_VERSION_MAJOR == 3 && CV_VERSION_MINOR > 1)
+    for (int cap : {CAP_V4L2, CAP_ANY})
+        if (inputVideo.open(deviceId, cap))
+            break;
+#else
+    inputVideo.open(deviceId);
+#endif
+
+    if (inputVideo.isOpened())
+    {
+        std::cerr << "ARUCO: switched to /dev/video" << deviceId << std::endl;
+        initCamera(deviceId, exists);
+    }
+    else
+    {
+        std::cerr << "ARUCO: failed to open /dev/video" << deviceId << std::endl;
+    }
+}
+
 // ----------------------------------------------------------------------------
 COVERPLUGIN(ARUCOPlugin)
+
+void ARUCOPlugin::tabletPressEvent(opencover::coTUIElement * /*tUIItem*/)
+{
+    // using ui::* menu controls; no legacy coTUI handling here
+}
+
+void ARUCOPlugin::tabletEvent(opencover::coTUIElement * /*tUIItem*/)
+{
+    // using ui::* menu controls; no legacy coTUI handling here
+}

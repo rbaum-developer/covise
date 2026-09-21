@@ -38,13 +38,20 @@
 #include <cover/ui/Menu.h>
 #include <cover/ui/Button.h>
 #include <cover/ui/Action.h>
+#include <cover/ui/SelectionList.h>
 
 using namespace covise;
 using namespace opencover;
 
+namespace opencover { namespace ui {
+class Action;
+class SelectionList;
+}}
+
 class ARUCOPlugin : public opencover::coVRPlugin,
                     public opencover::MarkerTrackingInterface,
-                    public ui::Owner
+                    public ui::Owner,
+                    public opencover::coTUIListener
 {
 public:
     ARUCOPlugin();
@@ -55,19 +62,19 @@ public:
     bool update() override;
     bool destroy() override;
     int loadPattern(const char* p);
-    
+
 protected:
     cv::VideoCapture inputVideo;
     cv::Mat image[3]; // for triple buffering
     int displayIdx = 0, readyIdx = 1, captureIdx = 2;
-    
+
     cv::Mat matCameraMatrix;
     cv::Mat matDistCoefs;
 
     std::vector<int> ids[3];
     std::vector<std::vector<cv::Point2f>> corners;
     std::vector<std::vector<cv::Point2f>> rejected;
-    
+
     cv::aruco::Dictionary dictionary;
     cv::Ptr<cv::aruco::ArucoDetector> detector;
     cv::Ptr<cv::aruco::DetectorParameters> detectorParams;
@@ -81,7 +88,9 @@ private:
     ui::Button* uiBtnDrawDetMarker = nullptr;
     ui::Button* uiBtnDrawRejMarker = nullptr;
     ui::Action* uiBtnCalib = nullptr;
-    
+    opencover::ui::Action *uiBtnDetectCamera = nullptr;
+    opencover::ui::SelectionList *uiCameraDevices = nullptr;
+
     int markerSize; // default marker size
 
     coTUISlider *bitrateSlider;
@@ -142,5 +151,22 @@ private:
     int calibCount;
     double lastCalibCapture=0.0;
     void startCallibration();
+
+    opencover::coTUITab *arucoTab = nullptr;
+    opencover::coTUIButton *detectCameraButton = nullptr;
+    opencover::coTUIComboBox *cameraDeviceCombo = nullptr;
+
+    std::vector<int> m_cameraDeviceIds;
+    int m_requestedDevice = -1;
+
+    static std::string runCommand(const std::string &cmd);
+    static std::string parseCardType(const std::string &v4l2Info);
+    void detectCameras();
+    void requestCameraSwitch(int deviceId);
+    void switchCamera(int deviceId);
+
+public:
+    void tabletPressEvent(opencover::coTUIElement *tUIItem) override;
+    void tabletEvent(opencover::coTUIElement *tUIItem) override;
 };
 #endif
