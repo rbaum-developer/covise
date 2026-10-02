@@ -809,7 +809,7 @@ void ARUCOPlugin::switchCamera(int deviceId)
 
     if (camera.open(deviceId))
     {
-        std::cerr << "ARUCO: switched to /dev/video" << deviceId << std::endl;
+        std::cerr << "ARUCO: switched to camera device " << deviceId << std::endl;
         MarkerTracking::instance()->running = true;
         MarkerTracking::instance()->videoMode = GL_BGR;
         MarkerTracking::instance()->videoDepth = 3;
@@ -818,7 +818,7 @@ void ARUCOPlugin::switchCamera(int deviceId)
     }
     else
     {
-        std::cerr << "ARUCO: failed to open /dev/video" << deviceId << std::endl;
+        std::cerr << "ARUCO: failed to open camera device " << deviceId << std::endl;
         MarkerTracking::instance()->running = false;
     }
 }
