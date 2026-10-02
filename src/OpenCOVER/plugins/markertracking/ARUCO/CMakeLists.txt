@@ -145,6 +145,7 @@ SET(HEADERS
   ARUCOTrackerPlugin.h
   Marker.h
   MatrixUtil.h
+  ../common/ARCamera.h
 #  CvCapture.h
   ../common/RemoteAR.h
 )
@@ -153,6 +154,7 @@ SET(SOURCES
   ARUCOTrackerPlugin.cpp
   Marker.cpp
   MatrixUtil.cpp
+  ../common/ARCamera.cpp
 #  CvCapture.cpp
   ../common/RemoteAR.cpp
 )

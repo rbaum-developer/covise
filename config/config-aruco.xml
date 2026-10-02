@@ -32,15 +32,28 @@
 
         <ARUCO value="ON">
           <Capture value="on" />
-          <VideoDevice ARCH="linux64opt" value="0" width="1920" height="1080" fourcc="MJPG" fps="30" />
-          <CameraCalibrationFile ARCH="linux64opt" value="~/covise/cameras/Logitech_HDProWebcamC920_No2_1920x1080.yaml" />
+          <VideoDevice value="0" width="640" height="480" fourcc="MJPG" fps="30" />
+          <CameraCalibrationFile value="/home/rosba/covise/config/aruco/default.yaml" />
+
+          <VideoDevice ARCH="linux64opt" value="0" width="640" height="480" fourcc="MJPG" fps="30" />
+          <CameraCalibrationFile ARCH="linux64opt" value="/home/rosba/covise/config/aruco/default.yaml" />
           <VideoDevice ARCH="linux" value="0" width="1920" height="1080" fourcc="MJPG" fps="60" />
           <CameraCalibrationFile ARCH="linux" value="/data/aruco/cameras/Logitech_HDProWebcamC920_No2_1920x1080.yaml" />
           <VideoDevice ARCH="macos" value="0" width="1280" height="720" />
           <CameraCalibrationFile ARCH="macos" value="config/opencv/apple_facetime_hd_camera.yaml" />
-          <DictionaryID value="7" /> <!-- 7=DICT_5x5_1000 --> 
-        </ARUCO>
-	
+          <SquaresX value="8" />
+          <SquaresY value="11" />
+          <SquareLength value="0.015" />
+          <MarkerSquare value="0.011" />
+          <!--<CharucoBoard>
+            <squaresX value="8" />
+            <squaresY value="11" />
+            <squareLength value="0.015" />
+            <markerLength value="0.011" />
+          </CharucoBoard> -->
+          <DictionaryID value="7" />  <!-- 7=DICT_5x5_1000 -->
+          <LegacyPattern value="false" />
+        </ARUCO>         
       </Plugin>
       
       <FPS value="true" />

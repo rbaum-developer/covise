@@ -9,6 +9,7 @@
 #define _ARUCO_PLUGIN_H
 
 #include "Marker.h"
+#include "../common/ARCamera.h"
 #include <cover/coVRPluginSupport.h>
 #include <cover/coVRPlugin.h>
 #include <cover/coVRCollaboration.h>
@@ -21,7 +22,6 @@
 #include <cover/coVRPlugin.h>
 
 #include <opencv2/core/version.hpp>
-#include <opencv2/videoio/videoio.hpp>
 
 #if CV_VERSION_MAJOR >= 4
 #include <opencv2/objdetect/aruco_dictionary.hpp>
@@ -64,12 +64,9 @@ public:
     int loadPattern(const char* p);
 
 protected:
-    cv::VideoCapture inputVideo;
+    ARCamera camera;
     cv::Mat image[3]; // for triple buffering
     int displayIdx = 0, readyIdx = 1, captureIdx = 2;
-
-    cv::Mat matCameraMatrix;
-    cv::Mat matDistCoefs;
 
     std::vector<int> ids[3];
     std::vector<std::vector<cv::Point2f>> corners;
@@ -98,7 +95,6 @@ private:
     //void captureRightVideo();
     int msgQueue;
     unsigned char *dataPtr = nullptr;
-    int xsize, ysize;
     int marker_num = 0;
     bool flipBufferH;
     bool flipBufferV;
@@ -109,7 +105,6 @@ private:
     bool isVisible(const MarkerTrackingMarker *marker) override;
     void updateMarkerParams() override;
     void createUnconfiguredTrackedMarkers() override;
-    std::string calibrationFilename;
 
 
     cv::Mat imageCopy;
@@ -123,9 +118,7 @@ private:
     void estimatePoseMarker(const std::vector<std::vector<cv::Point2f>> &corners, const cv::Mat &cameraMatrix, const cv::Mat &distCoeffs);
 
     void initUI();
-    void initCamera(int selectedDevice, bool &exists);
     bool initAR();
-    void calibrate();
 
     std::mutex opencvMutex;
     std::thread opencvThread;
@@ -139,18 +132,7 @@ private:
     cv::Ptr<cv::aruco::CharucoDetector>  charucoDetector;
     //Ptr<aruco::Board> board;
 
-    // collect data from each frame
-    vector< vector< vector< cv::Point2f > > > allCorners;
-    vector< vector< int > > allIds;
-    vector< cv::Mat > allImgs;
-    cv::Size imgSize;
-
-
-    bool doCalibrate;
-    bool calibrated;
-    int calibCount;
-    double lastCalibCapture=0.0;
-    void startCallibration();
+    void startCalibration();
 
     opencover::coTUITab *arucoTab = nullptr;
     opencover::coTUIButton *detectCameraButton = nullptr;
@@ -159,14 +141,8 @@ private:
     std::vector<int> m_cameraDeviceIds;
     int m_requestedDevice = -1;
 
-    static std::string runCommand(const std::string &cmd);
-    static std::string parseCardType(const std::string &v4l2Info);
     void detectCameras();
     void requestCameraSwitch(int deviceId);
     void switchCamera(int deviceId);
-
-public:
-    void tabletPressEvent(opencover::coTUIElement *tUIItem) override;
-    void tabletEvent(opencover::coTUIElement *tUIItem) override;
 };
 #endif
