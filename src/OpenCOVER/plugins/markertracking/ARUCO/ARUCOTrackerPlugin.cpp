@@ -25,6 +25,7 @@
 #include <cover/RenderObject.h>
 #include <cover/MarkerTracking.h>
 #include <config/CoviseConfig.h>
+#include <config/coConfig.h>
 #include <cover/coVRConfig.h>
 #include "../common/RemoteAR.h"
 #include <cover/VRViewer.h>
@@ -144,8 +145,6 @@ bool ARUCOPlugin::initAR()
         MarkerTracking::instance()->flipH = coCoviseConfig::isOn("COVER.Plugin.ARUCO.FlipHorizontal", false);
         flipBufferH = coCoviseConfig::isOn("COVER.Plugin.ARUCO.FlipBufferH", false);
         flipBufferV = coCoviseConfig::isOn("COVER.Plugin.ARUCO.FlipBufferV", true);
-        std::string VideoDevice = coCoviseConfig::getEntry("value", "COVER.Plugin.ARUCO.VideoDevice", "0");
-
         camera.setCalibrationFilename(coCoviseConfig::getEntry(
             "value",
             "COVER.Plugin.ARUCO.CameraCalibrationFile",
@@ -306,9 +305,15 @@ bool ARUCOPlugin::init()
     // detect cameras after AR init
     detectCameras();
 
-    // optional: auto-open first detected capture device
-    if (!m_cameraDeviceIds.empty())
+    const int preferredDevice = coCoviseConfig::getInt("value", "COVER.Plugin.ARUCO.VideoDevice", -1);
+    if (std::find(m_cameraDeviceIds.begin(), m_cameraDeviceIds.end(), preferredDevice) != m_cameraDeviceIds.end())
+        switchCamera(preferredDevice);
+    else if (!m_cameraDeviceIds.empty())
+    {
+        std::cerr << "ARUCO: configured camera " << preferredDevice
+                  << " is unavailable; opening the first detected camera" << std::endl;
         switchCamera(m_cameraDeviceIds.front());
+    }
 
     opencvRunning = true;
     opencvThread = std::thread(
@@ -394,7 +399,7 @@ void ARUCOPlugin::preFrame()
         guard.lock();
         displayIdx = readyIdx;
         MarkerTracking::instance()->videoData =
-            image[displayIdx].empty() ? nullptr : (unsigned char *)image[displayIdx].ptr();
+            displayImage[displayIdx].empty() ? nullptr : (unsigned char *)displayImage[displayIdx].ptr();
     }
 }
 
@@ -526,15 +531,15 @@ void ARUCOPlugin::opencvLoop()
             
             // Copy image otherwise it changes the original image when drawing markers
             // (this would be bad for calibration, as the corners would be drawn on the image and then used for calibration)
-            cv::Mat displayImage = image[captureIdx].clone();
+            displayImage[captureIdx] = image[captureIdx].clone();
             // draw detected/rejected markers on the camera image
-             if (bDrawDetMarker && !displayImage.empty())
+             if (bDrawDetMarker && !displayImage[captureIdx].empty())
             {
-                cv::aruco::drawDetectedMarkers(displayImage, corners, ids[captureIdx]);
+                cv::aruco::drawDetectedMarkers(displayImage[captureIdx], corners, ids[captureIdx]);
             }
             if (bDrawRejMarker && !rejected.empty())
             {
-                cv::aruco::drawDetectedMarkers(displayImage, rejected, cv::noArray(), cv::Scalar(100, 0, 255));
+                cv::aruco::drawDetectedMarkers(displayImage[captureIdx], rejected, cv::noArray(), cv::Scalar(100, 0, 255));
             } 
 
             //std::cerr << "ARUCO: detected corners = " << corners.size() << std::endl;
@@ -810,6 +815,10 @@ void ARUCOPlugin::switchCamera(int deviceId)
     if (camera.open(deviceId))
     {
         std::cerr << "ARUCO: switched to camera device " << deviceId << std::endl;
+        auto *config = coConfig::getInstance();
+        config->setValue("value", std::to_string(deviceId), "COVER.Plugin.ARUCO.VideoDevice");
+        if (!config->save())
+            std::cerr << "ARUCO: failed to save default camera device " << deviceId << std::endl;
         MarkerTracking::instance()->running = true;
         MarkerTracking::instance()->videoMode = GL_BGR;
         MarkerTracking::instance()->videoDepth = 3;

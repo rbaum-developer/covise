@@ -66,6 +66,7 @@ public:
 protected:
     ARCamera camera;
     cv::Mat image[3]; // for triple buffering
+    cv::Mat displayImage[3]; // rendered marker frames published to OpenCOVER
     int displayIdx = 0, readyIdx = 1, captureIdx = 2;
 
     std::vector<int> ids[3];

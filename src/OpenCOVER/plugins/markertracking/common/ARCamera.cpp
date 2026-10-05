@@ -386,8 +386,13 @@ void ARCamera::calibrateFrame(const cv::Mat &frame,
 
 	std::vector<cv::Point2f> charucoCorners;
 	std::vector<int> charucoIds;
-	detector->detectBoard(gray, charucoCorners, charucoIds);
-	const int numCorners = static_cast<int>(std::min(charucoCorners.size(), charucoIds.size()));
+	auto refinedMarkerCorners = markerCorners;
+	auto refinedMarkerIds = markerIds;
+	detector->detectBoard(gray, charucoCorners, charucoIds, refinedMarkerCorners, refinedMarkerIds);
+	
+    std::cerr << "ARUCO calib: detected " << refinedMarkerIds.size() << " markers, "
+              << charucoIds.size() << " ChArUco corners" << std::endl;
+    const int numCorners = static_cast<int>(charucoIds.size());
 
 	const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 	const bool captureIntervalElapsed = m_lastCalibrationCapture <= 0.0 || now - m_lastCalibrationCapture > 0.20;
