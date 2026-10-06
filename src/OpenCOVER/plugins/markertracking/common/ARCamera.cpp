@@ -386,13 +386,14 @@ void ARCamera::calibrateFrame(const cv::Mat &frame,
 
 	std::vector<cv::Point2f> charucoCorners;
 	std::vector<int> charucoIds;
+	//cv::Mat charucoCorners, charucoIds;
 	auto refinedMarkerCorners = markerCorners;
 	auto refinedMarkerIds = markerIds;
 	detector->detectBoard(gray, charucoCorners, charucoIds, refinedMarkerCorners, refinedMarkerIds);
 	
     std::cerr << "ARUCO calib: detected " << refinedMarkerIds.size() << " markers, "
               << charucoIds.size() << " ChArUco corners" << std::endl;
-    const int numCorners = static_cast<int>(charucoIds.size());
+    const int numCorners = charucoIds.size();
 
 	const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 	const bool captureIntervalElapsed = m_lastCalibrationCapture <= 0.0 || now - m_lastCalibrationCapture > 0.20;
@@ -400,8 +401,8 @@ void ARCamera::calibrateFrame(const cv::Mat &frame,
 	if (sampleAccepted)
 	{
 		m_lastCalibrationCapture = now;
-		m_allCorners.push_back(markerCorners);
-		m_allIds.push_back(markerIds);
+		m_allCorners.push_back(refinedMarkerCorners);
+		m_allIds.push_back(refinedMarkerIds);
 		m_allImages.push_back(frame.clone());
 		m_calibrationImageSize = frame.size();
 		std::cerr << "ARUCO calib accepted: " << m_allIds.size() << " (charuco corners=" << numCorners << ")" << std::endl;
@@ -490,21 +491,31 @@ void ARCamera::calibrateFrame(const cv::Mat &frame,
 	const auto &boardCorners = board->getChessboardCorners();
 	std::vector<std::vector<cv::Point3f>> objectPoints;
 	std::vector<std::vector<cv::Point2f>> imagePoints;
-	for (size_t i = 0; i < m_allImages.size(); ++i)
+	for (size_t i = 0; i < m_allImages.size() && i < m_allCorners.size() && i < m_allIds.size(); ++i)
 	{
-		cv::Mat detectedCorners, detectedIds;
-		detector->detectBoard(m_allImages[i], detectedCorners, detectedIds,
-							  m_allCorners[i], m_allIds[i]);
+		cv::Mat calibrationGray;
+		if (m_allImages[i].channels() == 3)
+			cv::cvtColor(m_allImages[i], calibrationGray, cv::COLOR_BGR2GRAY);
+		else
+			calibrationGray = m_allImages[i];
+
+		std::vector<cv::Point2f> detectedCorners;
+		std::vector<int> detectedIds;
+		auto frameMarkerCorners = m_allCorners[i];
+		auto frameMarkerIds = m_allIds[i];
+		detector->detectBoard(calibrationGray, detectedCorners, detectedIds,
+						  frameMarkerCorners, frameMarkerIds);
 		if (detectedCorners.empty() || detectedIds.empty())
 			continue;
+
 		std::vector<cv::Point2f> imagePointsForFrame;
 		std::vector<cv::Point3f> objectPointsForFrame;
-		for (int k = 0; k < detectedIds.rows; ++k)
+		for (size_t k = 0; k < detectedIds.size(); ++k)
 		{
-			const int id = detectedIds.at<int>(k, 0);
+			const int id = detectedIds[k];
 			if (id >= 0 && id < static_cast<int>(boardCorners.size()))
 			{
-				imagePointsForFrame.push_back(detectedCorners.at<cv::Point2f>(k, 0));
+				imagePointsForFrame.push_back(detectedCorners[k]);
 				objectPointsForFrame.push_back(boardCorners[id]);
 			}
 		}
@@ -519,6 +530,46 @@ void ARCamera::calibrateFrame(const cv::Mat &frame,
 												cameraMatrix, distCoefficients, rotationVectors,
 												translationVectors, calibrationFlags);
 #endif
+
+	// Debugging/logging to find out why calibration doesn't get saved
+	std::cerr << "ARUCO calib: total saved samples = " << m_allImages.size()
+			  << ", frames used for calibration = " << imagePoints.size() << std::endl;
+	std::cerr << "ARUCO calib: reprojectionError = " << reprojectionError << std::endl;
+	if (!cameraMatrix.empty())
+		std::cerr << "ARUCO calib: cameraMatrix size = " << cameraMatrix.rows << "x" << cameraMatrix.cols << std::endl;
+	else
+		std::cerr << "ARUCO calib: cameraMatrix is empty" << std::endl;
+	if (!distCoefficients.empty())
+		std::cerr << "ARUCO calib: distCoefficients size = " << distCoefficients.rows << "x" << distCoefficients.cols << std::endl;
+	else
+		std::cerr << "ARUCO calib: distCoefficients is empty" << std::endl;
+	std::cerr << "ARUCO calib: target filename = '" << m_calibrationFilename << "'" << std::endl;
+
+	// Try opening FileStorage to detect file/permission issues
+	if (!m_calibrationFilename.empty())
+	{
+		cv::FileStorage testFs;
+		try
+		{
+			testFs.open(m_calibrationFilename, cv::FileStorage::WRITE);
+		}
+		catch (const cv::Exception &e)
+		{
+			std::cerr << "ARUCO calib: FileStorage open threw: " << e.what() << std::endl;
+		}
+		if (!testFs.isOpened())
+			std::cerr << "ARUCO calib: cannot open calibration file for writing: " << m_calibrationFilename << std::endl;
+		else
+		{
+			std::cerr << "ARUCO calib: FileStorage open OK for: " << m_calibrationFilename << std::endl;
+			testFs.release();
+			// optionally remove the empty test file if created
+		}
+	}
+	else
+	{
+		std::cerr << "ARUCO calib: calibration filename is empty; cannot save." << std::endl;
+	}
 
 	if (!cameraMatrix.empty() && !distCoefficients.empty() && reprojectionError >= 0.0)
 		finishCalibration(cameraMatrix, distCoefficients, m_calibrationImageSize, aspectRatio,
